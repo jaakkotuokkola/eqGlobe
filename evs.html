@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>eqGlobe</title>
+    <style>
+        body { margin: 0; }
+        canvas { 
+            display: block;
+            position: fixed;
+            z-index: 1;
+            pointer-events: none;
+        }
+        canvas:hover {
+            pointer-events: all;
+        }
+        #terminal {
+            position: fixed;
+            top: 40px;
+            right: 20px;
+            width: 300px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            padding: 10px;
+            border: 1px solid #000000;
+            max-height: 80vh;
+            overflow-y: auto;
+            z-index: 2;
+            pointer-events: all;
+        }
+        .quake-entry {
+            padding: 5px;
+            border-bottom: 1px solid #003300;
+            cursor: pointer;
+        }
+        .quake-entry:hover {
+            background: rgba(0, 255, 0, 0.1);
+        }
+        #coord-display {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            padding: 10px;
+            border: 1px solid #000000;
+            z-index: 3;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="coord-display">
+        Selected Coordinates:<br>
+        Lat: N/A<br>
+        Lon: N/A
+    </div>
+    <div id="terminal">
+        <div id="terminal-content">
+            <div style="font-size: 0.8em; color: #08fa00; margin-top: 5px;">Click entry to locate</div>
+            <div id="quake-list"></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+let scene, camera, renderer, earth, controls;
+let markers = [];
+const EARTH_RADIUS = 5;
+const ROTATION_SPEED = 0.002;
+let isRotationPaused = false;
+let currentLine = null;
+
+init();
+animate();
+setInterval(fetchData, 60000);
+
+async function init() {
+    // Scene setup
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+
+    renderer = new THREE.WebGLRenderer({
+        antialias: true,
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.domElement.style.pointerEvents = 'auto'; 
+    document.body.appendChild(renderer.domElement);
+
+    renderer.domElement.style.position = 'fixed';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+
+    // NASA Earth texture
+    const textureLoader = new THREE.TextureLoader();
+    const earthTexture = await textureLoader.loadAsync(
+        'https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Blue_Marble_2002.png/1024px-Blue_Marble_2002.png'
+    );
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(5, 3, 5);
+    scene.add(light);
+
+    // Earth sphere with NASA texture
+    const geometry = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64);
+    const material = new THREE.MeshPhongMaterial({
+        map: earthTexture,
+        bumpScale: 0.05,
+        specular: new THREE.Color('grey'),
+        shininess: 5
+    });
+    earth = new THREE.Mesh(geometry, material);
+    scene.add(earth);
+    
+
+    // Camera controls
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    camera.position.z = 15;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: null
+    };
+
+    fetchData();
+    document.addEventListener('keydown', e => {
+        if(e.ctrlKey) earth.material.wireframe = !earth.material.wireframe;
+    });
+    // pause rotation on spacebar press
+    document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+        e.preventDefault();
+        isRotationPaused = !isRotationPaused;
+    }
+});
+
+}
+
+// fetching from USGS API, 1 day worth of data for now
+async function fetchData() {
+    try {
+        const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${new Date(Date.now()-86400000).toISOString()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        updateMarkers(data.features);
+    } catch(error) {
+        console.error('Error fetching data:', error);
+    }
+}
+// markers for earthquakes, trying to make them stand out while still leaving alot of space for the earth texture
+function createMarker(mag, depth) {
+    const size = 0.15 * Math.log(mag + 1) * 1.8;
+    const color = new THREE.Color().setHSL(0.66 * (1 - mag/8), 0.8, 0.6 + mag/15);
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(12 * 3);
+    const colors = new Float32Array(12 * 3);
+    const depthIndicator = depth * 0.001;
+
+    for(let i = 0; i < 12; i++) {
+        const angle = (i / 6) * Math.PI;
+        positions[i*3] = size * Math.cos(angle);
+        positions[i*3+1] = size * Math.sin(angle);
+        positions[i*3+2] = -depthIndicator;
+        
+        colors[i*3] = color.r * (0.9 + depthIndicator);
+        colors[i*3+1] = color.g * (0.8 - depthIndicator);
+        colors[i*3+2] = color.b * (0.7 - depthIndicator);
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    return new THREE.Points(geometry, new THREE.PointsMaterial({
+        size: 0.8,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: true,
+        sizeAttenuation: false
+    }));
+}
+
+// coordinate formatting for displaying selected datapoint's coordinates
+function formatCoordinate(coord, isLatitude) {
+        const directions = isLatitude ? ['N', 'S'] : ['E', 'W'];
+        const absolute = Math.abs(coord).toFixed(2);
+        const direction = directions[coord >= 0 ? 0 : 1];
+        return `${absolute}° ${direction}`;
+    }
+
+function updateMarkers(features) {
+    markers.forEach(marker => earth.remove(marker));
+    markers = [];
+    const quakeList = document.getElementById('quake-list');
+    quakeList.innerHTML = '';
+
+    features.sort((a, b) => b.properties.mag - a.properties.mag);
+
+    features.forEach((feature, index) => {
+        const [lon, lat, depth] = feature.geometry.coordinates;
+        const mag = feature.properties.mag;
+        const place = feature.properties.place;
+        
+        // Create marker
+        const marker = createMarker(mag, depth);
+        marker.position.copy(latLonToVector3(lat, lon));
+        marker.lookAt(earth.position);
+        marker.userData = {
+            phase: Math.random() * Math.PI,
+            info: feature.properties
+        };
+        earth.add(marker);
+        markers.push(marker);
+
+        // Create terminal entry
+        const entry = document.createElement('div');
+        entry.className = 'quake-entry';
+        entry.innerHTML = `
+            <div style="display: flex; justify-content: space-between;">
+                <span>M${mag.toFixed(1)}</span>
+                <span style="color: ${getColorCode(mag)}">⬤</span>
+            </div>
+            <div style="font-size: 0.8em; color: #ffffff;">
+                ${place}<br>
+                Depth: ${depth.toFixed(0)}km
+            </div>
+        `;
+
+        entry.addEventListener('click', () => {
+        // Remove previous line
+        if(currentLine) earth.remove(currentLine);
+
+        // Get coordinates from feature data
+        const [longitude, latitude] = feature.geometry.coordinates;
+        
+        // Update coordinate display
+        document.getElementById('coord-display').innerHTML = `
+            Selected Coordinates:<br>
+            Lat: ${formatCoordinate(latitude, true)}<br>
+            Lon: ${formatCoordinate(longitude, false)}
+        `;
+
+            // Create line geometry relative to Earth's coordinate system
+            const markerPos = marker.position.clone();
+            const lineDirection = markerPos.clone().normalize();
+            const lineEnd = markerPos.clone().add(lineDirection.multiplyScalar(3));
+
+            const lineGeometry = new THREE.BufferGeometry();
+            const positions = new Float32Array([
+                markerPos.x, markerPos.y, markerPos.z,
+                lineEnd.x, lineEnd.y, lineEnd.z
+            ]);
+            
+            lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: 0x00ff00,
+                linewidth: 2
+            });
+            
+            currentLine = new THREE.Line(lineGeometry, lineMaterial);
+            earth.add(currentLine); // Add to Earth instead of scene
+
+            // Highlight entry
+            document.querySelectorAll('.quake-entry').forEach(e => 
+                e.style.background = 'transparent');
+            entry.style.background = 'rgba(0, 255, 0, 0.2)';
+        });
+
+        quakeList.appendChild(entry);
+    });
+}
+
+// could change color based on magnitude
+function getColorCode(mag) {
+    if(mag >= 8) return '#ff0000';
+    if(mag >= 7) return '#ff3300'; 
+    if(mag >= 6) return '#ff6600';
+    if(mag >= 5) return '#ff9900';
+    if(mag >= 4) return '#ffcc00';
+    if(mag >= 3) return '#ffff00'; 
+    return '#00ccff';
+}
+
+// fixed longitude offset by changing the direction of rotation
+function latLonToVector3(lat, lon) {
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+        console.warn('Invalid coordinates:', lat, lon);
+        return new THREE.Vector3(0, 0, 0);
+    }
+
+    const latRad = THREE.MathUtils.degToRad(lat);
+    const lonRad = THREE.MathUtils.degToRad(lon);
+
+    // Align with Three.js right-handed coordinate system
+    return new THREE.Vector3(
+        Math.cos(latRad) * Math.cos(lonRad), // X-axis
+        Math.sin(latRad),                    // Y-axis (latitude)
+        -Math.cos(latRad) * Math.sin(lonRad) // Z-axis (longitude, inverted)
+    ).multiplyScalar(EARTH_RADIUS * 1.001);
+}
+
+// markers should ne hidden when they are behind the earth
+function updateMarkerVisibility() {
+    const cameraPosition = camera.position.clone();
+    const earthCenter = new THREE.Vector3(0, 0, 0);
+    
+    markers.forEach(marker => {
+        // Get marker's world position
+        const markerWorldPos = new THREE.Vector3();
+        marker.getWorldPosition(markerWorldPos);
+        
+        // Check if marker is on the visible hemisphere
+        const cameraToEarth = earthCenter.clone().sub(cameraPosition).normalize();
+        const earthToMarker = markerWorldPos.clone().sub(earthCenter).normalize();
+        marker.visible = earthToMarker.dot(cameraToEarth) < 0;
+    });
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    const time = Date.now() * 0.001;
+    
+    markers.forEach(marker => {
+        if(marker.userData) {
+            marker.material.opacity = 0.7 + 0.2 * Math.sin(time + marker.userData.phase);
+        }
+    });
+    
+    updateMarkerVisibility();
+    // Only rotate if not paused
+    if (!isRotationPaused) {
+        earth.rotation.y -= ROTATION_SPEED;
+    }
+    controls.update();
+    renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
