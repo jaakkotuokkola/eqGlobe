@@ -1,254 +1,507 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>eqGlobe</title>
+    <title>eqGlobe - Seismic Data</title>
     <style>
-        body { margin: 0; }
-        canvas { 
-            display: block;
-            position: fixed;
-            z-index: 1;
-            pointer-events: none;
+        :root {
+            --background: #121212;
+            --panel-bg: rgba(0, 0, 0, 0.9);
+            --text: #ffffff;
         }
-        canvas:hover {
-            pointer-events: all;
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body { 
+            margin: 0; 
+            font-family: monospace;
+            background: var(--background);
+            color: var(--text);
+            line-height: 1.2;
+            font-size: 12px;
         }
-        #terminal {
+
+        .events-panel {
             position: fixed;
-            top: 40px;
-            right: 20px;
-            width: 300px;
-            background: rgba(0, 0, 0, 0.8);
-            color: #ffffff;
-            font-family: 'Courier New', monospace;
-            padding: 10px;
-            border: 1px solid #000000;
-            max-height: 80vh;
+            top: 10px;
+            right: 10px;
+            min-width: 200px;
+            min-height: 200px;
+            width: 320px;
+            max-height: 95vh;
+            background: var(--panel-bg);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 8px;
             overflow-y: auto;
-            z-index: 2;
-            pointer-events: all;
+            overflow-x: hidden;
+            z-index: 9999; /* panel on top */
+            color: var(--text);
+            resize: both;
+            overflow: auto;
         }
-        .quake-entry {
-            padding: 5px;
-            border-bottom: 1px solid #003300;
+
+        .panel-header {
+            color: var(--text);
+            font-size: 12px;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: move;
+            user-select: none;
+            padding: 4px;
+        }
+
+        .time-control {
+            padding: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            margin-bottom: 8px;
+        }
+
+        .time-slider {
+            width: 100%;
+            margin: 4px 0;
+        }
+
+        .event-list {
+            max-height: none;
+            overflow: visible;
+            height: calc(100% - 80px);
+            overflow-y: auto;
+        }
+
+        .event-item {
+            padding: 4px;
+            margin: 2px 0;
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 2px solid transparent;
             cursor: pointer;
+            font-family: monospace;
+            color: var(--text);
+            word-wrap: break-word;
+            white-space: normal;
         }
-        .quake-entry:hover {
-            background: rgba(0, 255, 0, 0.1);
+
+        .event-item:hover {
+            background: rgba(255, 255, 255, 0.1);
         }
-        #coord-display {
+
+        .event-item.selected {
+            background: rgba(255, 255, 255, 0.15);
+            border-left-color: #ffffff;
+        }
+
+        .event-info {
+            font-family: monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .event-place {
+            font-size: 11px;
+            opacity: 0.8;
+            margin-top: 2px;
+            word-wrap: break-word;
+            white-space: normal;
+        }
+
+        .event-details {
+            display: none;
+            background: rgba(40, 40, 40, 0.6);
+            padding: 8px;
+            margin-top: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border-left: 2px solid var(--text);
+            font-size: 11px;
+        }
+
+        .event-item.selected .event-details {
+            display: block;
+        }
+
+        #loading {
             position: fixed;
-            top: 20px;
-            left: 20px;
-            background: rgba(0, 0, 0, 0.8);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 8px 12px;
+            font-family: monospace;
+            z-index: 10000;  /* loading is visible, should change position for less obstructive ux*/
             color: #ffffff;
-            font-family: 'Courier New', monospace;
-            padding: 10px;
-            border: 1px solid #000000;
-            z-index: 3;
-            pointer-events: none;
+        }
+
+        canvas#renderer {
+            position: fixed !important;
+            top: 0;
+            left: 0;
+            z-index: 0 !important;
+        }
+
+        @media (max-width: 768px) {
+            .events-panel {
+                width: 100%;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                top: auto;
+                max-height: 50vh;
+            }
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 0;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
         }
     </style>
 </head>
 <body>
-    <div id="coord-display">
-        Selected Coordinates:<br>
-        Lat: N/A<br>
-        Lon: N/A
-    </div>
-    <div id="terminal">
-        <div id="terminal-content">
-            <div style="font-size: 0.8em; color: #08fa00; margin-top: 5px;">Click entry to locate</div>
-            <div id="quake-list"></div>
+    <div class="events-panel">
+        <div class="panel-header">Events</div>
+        <div class="time-control">
+            <div>Time Range: <span id="time-value">24h</span></div>
+            <input type="range" class="time-slider" min="1" max="168" value="24" step="1">
         </div>
+        <div class="event-list" id="event-list"></div>
+    </div>
+
+    <div id="loading">
+        <div class="loading-spinner"></div>
+        <span>Loading earthquake data...</span>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
-<script>
-let scene, camera, renderer, earth, controls;
-let markers = [];
-const EARTH_RADIUS = 5;
-const ROTATION_SPEED = 0.002;
-let isRotationPaused = false;
-let currentLine = null;
+    <script>
+        let scene, camera, renderer, earth, controls;
+        let markers = [];
+        const EARTH_RADIUS = 5;
+        const ROTATION_SPEED = 0.002;
+        let isRotationPaused = false;
+        let currentLine = null;
+        let quakeData = [];
 
-init();
-animate();
-setInterval(fetchData, 60000);
+        let activeTimeRange = 24;
+        let filteredData = [];
 
-async function init() {
-    // Scene setup
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        let isDragging = false;
+        let currentX;
+        let currentY;
+        let initialX;
+        let initialY;
 
-    renderer = new THREE.WebGLRenderer({
-        antialias: true,
-    });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.domElement.style.pointerEvents = 'auto'; 
-    document.body.appendChild(renderer.domElement);
-
-    renderer.domElement.style.position = 'fixed';
-    renderer.domElement.style.top = '0';
-    renderer.domElement.style.left = '0';
-
-    // NASA Earth texture
-    const textureLoader = new THREE.TextureLoader();
-    const earthTexture = await textureLoader.loadAsync(
-        'https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Blue_Marble_2002.png/1024px-Blue_Marble_2002.png'
-    );
-
-    // Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(5, 3, 5);
-    scene.add(light);
-
-    // Earth sphere with NASA texture
-    const geometry = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64);
-    const material = new THREE.MeshPhongMaterial({
-        map: earthTexture,
-        bumpScale: 0.05,
-        specular: new THREE.Color('grey'),
-        shininess: 5
-    });
-    earth = new THREE.Mesh(geometry, material);
-    scene.add(earth);
-    
-
-    // Camera controls
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    camera.position.z = 15;
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.mouseButtons = {
-        LEFT: THREE.MOUSE.ROTATE,
-        MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: null
-    };
-
-    fetchData();
-    document.addEventListener('keydown', e => {
-        if(e.ctrlKey) earth.material.wireframe = !earth.material.wireframe;
-    });
-    // pause rotation on spacebar press
-    document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') {
-        e.preventDefault();
-        isRotationPaused = !isRotationPaused;
-    }
-});
-
-}
-
-// fetching from USGS API, 1 day worth of data for now
-async function fetchData() {
-    try {
-        const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${new Date(Date.now()-86400000).toISOString()}`;
-        const response = await fetch(url);
-        const data = await response.json();
-        updateMarkers(data.features);
-    } catch(error) {
-        console.error('Error fetching data:', error);
-    }
-}
-// markers for earthquakes, trying to make them stand out while still leaving alot of space for the earth texture
-function createMarker(mag, depth) {
-    const size = 0.15 * Math.log(mag + 1) * 1.8;
-    const color = new THREE.Color().setHSL(0.66 * (1 - mag/8), 0.8, 0.6 + mag/15);
-
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(12 * 3);
-    const colors = new Float32Array(12 * 3);
-    const depthIndicator = depth * 0.001;
-
-    for(let i = 0; i < 12; i++) {
-        const angle = (i / 6) * Math.PI;
-        positions[i*3] = size * Math.cos(angle);
-        positions[i*3+1] = size * Math.sin(angle);
-        positions[i*3+2] = -depthIndicator;
-        
-        colors[i*3] = color.r * (0.9 + depthIndicator);
-        colors[i*3+1] = color.g * (0.8 - depthIndicator);
-        colors[i*3+2] = color.b * (0.7 - depthIndicator);
-    }
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    return new THREE.Points(geometry, new THREE.PointsMaterial({
-        size: 0.8,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.9,
-        depthTest: true,
-        sizeAttenuation: false
-    }));
-}
-
-// coordinate formatting for displaying selected datapoint's coordinates
-function formatCoordinate(coord, isLatitude) {
-        const directions = isLatitude ? ['N', 'S'] : ['E', 'W'];
-        const absolute = Math.abs(coord).toFixed(2);
-        const direction = directions[coord >= 0 ? 0 : 1];
-        return `${absolute}° ${direction}`;
-    }
-
-function updateMarkers(features) {
-    markers.forEach(marker => earth.remove(marker));
-    markers = [];
-    const quakeList = document.getElementById('quake-list');
-    quakeList.innerHTML = '';
-
-    features.sort((a, b) => b.properties.mag - a.properties.mag);
-
-    features.forEach((feature, index) => {
-        const [lon, lat, depth] = feature.geometry.coordinates;
-        const mag = feature.properties.mag;
-        const place = feature.properties.place;
-        
-        // Create marker
-        const marker = createMarker(mag, depth);
-        marker.position.copy(latLonToVector3(lat, lon));
-        marker.lookAt(earth.position);
-        marker.userData = {
-            phase: Math.random() * Math.PI,
-            info: feature.properties
+        // cached DOM elements
+        const domElements = {
+            panel: null,
+            eventList: null,
+            timeSlider: null,
+            timeValue: null,
+            loading: null
         };
-        earth.add(marker);
-        markers.push(marker);
 
-        // Create terminal entry
-        const entry = document.createElement('div');
-        entry.className = 'quake-entry';
-        entry.innerHTML = `
-            <div style="display: flex; justify-content: space-between;">
-                <span>M${mag.toFixed(1)}</span>
-                <span style="color: ${getColorCode(mag)}">⬤</span>
-            </div>
-            <div style="font-size: 0.8em; color: #ffffff;">
-                ${place}<br>
-                Depth: ${depth.toFixed(0)}km
-            </div>
-        `;
+        // marker pool
+        const markerPool = {
+            active: new Map(),
+            inactive: [],
+            idToMarker: new Map(), // track markers by feature ID
+            getMarker(mag, depth) {
+                if (this.inactive.length > 0) {
+                    const marker = this.inactive.pop();
+                    this.updateMarker(marker, mag, depth);
+                    return marker;
+                }
+                return createMarker(mag, depth);
+            },
+            updateMarker(marker, mag, depth) {
+                // update existing marker
+                const size = 0.15 * Math.log(mag + 1) * 1.8;
+                const color = new THREE.Color().setHSL(0.66 * (1 - mag/8), 0.8, 0.6 + mag/15);
+                marker.material.size = size;
+                marker.material.color = color;
+                return marker;
+            },
+            recycleMarker(marker) {
+                marker.visible = false;
+                this.inactive.push(marker);
+            }
+        };
 
-        entry.addEventListener('click', () => {
-        // Remove previous line
-        if(currentLine) earth.remove(currentLine);
+        // throttle function for marker visibility updates,
+        function throttle(func, limit) {
+            let inThrottle;
+            return function(...args) {
+                if (!inThrottle) {
+                    func.apply(this, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            };
+        }
 
-        // Get coordinates from feature data
-        const [longitude, latitude] = feature.geometry.coordinates;
-        
-        // Update coordinate display
-        document.getElementById('coord-display').innerHTML = `
-            Selected Coordinates:<br>
-            Lat: ${formatCoordinate(latitude, true)}<br>
-            Lon: ${formatCoordinate(longitude, false)}
-        `;
+        function cacheDOMElements() {
+            domElements.panel = document.querySelector('.events-panel');
+            domElements.eventList = document.getElementById('event-list');
+            domElements.timeSlider = document.querySelector('.time-slider');
+            domElements.timeValue = document.getElementById('time-value');
+            domElements.loading = document.getElementById('loading');
+        }
 
-            // Create line geometry relative to Earth's coordinate system
+        async function init() {
+            try {
+                cacheDOMElements();
+                scene = new THREE.Scene();
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+                
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.domElement.id = 'renderer';
+                document.body.appendChild(renderer.domElement);
+                
+                // earth texture
+                const textureLoader = new THREE.TextureLoader();
+                const earthTexture = await textureLoader.loadAsync(
+                    'https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Blue_Marble_2002.png/1024px-Blue_Marble_2002.png'
+                );
+
+                // setup
+                const geometry = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64);
+                const material = new THREE.MeshPhongMaterial({
+                    map: earthTexture,
+                    bumpScale: 0.05,
+                    specular: new THREE.Color('grey'),
+                    shininess: 5
+                });
+                
+                earth = new THREE.Mesh(geometry, material);
+                scene.add(earth);
+
+                // lighting
+                scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+                const light = new THREE.DirectionalLight(0xffffff, 1);
+                light.position.set(5, 3, 5);
+                scene.add(light);
+
+                // camera
+                camera.position.z = 15;
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+
+                document.addEventListener('keydown', e => {
+                    if(e.code === 'Space') {
+                        e.preventDefault();
+                        isRotationPaused = !isRotationPaused;
+                    }
+                    if(e.ctrlKey) earth.material.wireframe = !earth.material.wireframe;
+                });
+
+                window.addEventListener('resize', () => {
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                // update time slider handler
+                document.querySelector('.time-slider').addEventListener('input', (e) => {
+                    activeTimeRange = parseInt(e.target.value);
+                    document.getElementById('time-value').textContent = 
+                        activeTimeRange >= 24 ? `${(activeTimeRange/24).toFixed(1)}d` : `${activeTimeRange}h`;
+                    applyTimeFilter();
+                });
+
+                // start animation and data fetch only after earth is ready
+                animate();
+                await fetchData();
+                
+                // periodic updates
+                setInterval(fetchData, 60000);
+
+                initDragAndResize();
+
+            } catch(error) {
+                console.error('Initialization error:', error);
+                domElements.loading.innerHTML = 
+                    `<div style="color: #ff4444">Error initializing: ${error.message}</div>`;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (earth && !isRotationPaused) {
+                earth.rotation.y -= ROTATION_SPEED;
+            }
+            
+            if (markers.length > 0) {
+                const time = Date.now() * 0.001;
+                markers.forEach(marker => {
+                    if (marker.userData) {
+                        marker.material.opacity = 0.7 + 0.2 * Math.sin(time + marker.userData.phase);
+                    }
+                });
+                updateMarkerVisibility();
+            }
+            
+            if (controls) controls.update();
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        async function fetchData() {
+            const loading = document.getElementById('loading');
+            if (loading) loading.style.display = 'block';
+            
+            try {
+                // fetch data for the past week
+                const startTime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+                const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startTime}&minmagnitude=2.5`;
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Network response was not ok');
+                
+                const data = await response.json();
+                if (!data.features || !data.features.length) {
+                    throw new Error('No earthquake data received');
+                }
+
+                quakeData = data.features;
+                applyTimeFilter();
+            } catch(error) {
+                console.error('Error fetching data:', error);
+            } finally {
+                if (loading) loading.style.display = 'none';
+            }
+        }
+
+        // Optimized updateMarkers function
+        function updateMarkers(features) {
+            if (!features?.length || !earth) return;
+
+            // clear previous markers
+            markerPool.active.forEach((marker) => {
+                markerPool.recycleMarker(marker);
+                earth.remove(marker);
+            });
+            markerPool.active.clear();
+            markerPool.idToMarker.clear();
+
+            features.forEach(feature => {
+                const [lon, lat, depth] = feature.geometry.coordinates;
+                const mag = feature.properties.mag;
+                
+                const marker = markerPool.getMarker(mag, depth);
+                marker.position.copy(latLonToVector3(lat, lon));
+                marker.lookAt(earth.position);
+                marker.userData = {
+                    phase: Math.random() * Math.PI,
+                    info: feature.properties
+                };
+                marker.visible = true;
+                earth.add(marker);
+                markerPool.active.set(feature.id, marker);
+                // track markers by time
+                markerPool.idToMarker.set(feature.properties.time, marker);
+            });
+        }
+
+        function createMarker(mag, depth) {
+            const size = 0.15 * Math.log(mag + 1) * 1.8;
+            const color = new THREE.Color().setHSL(0.66 * (1 - mag/8), 0.8, 0.6 + mag/15);
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(12 * 3);
+            const colors = new Float32Array(12 * 3);
+            const depthIndicator = depth * 0.001;
+
+            for(let i = 0; i < 12; i++) {
+                const angle = (i / 6) * Math.PI;
+                positions[i*3] = size * Math.cos(angle);
+                positions[i*3+1] = size * Math.sin(angle);
+                positions[i*3+2] = -depthIndicator;
+                
+                colors[i*3] = color.r * (0.9 + depthIndicator);
+                colors[i*3+1] = color.g * (0.8 - depthIndicator);
+                colors[i*3+2] = color.b * (0.7 - depthIndicator);
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            // depth-based color variation
+            const depthColor = new THREE.Color().setHSL(
+                0.7 - (depth/700),
+                0.8,
+                0.5 + (mag/10)
+            );
+            
+            color.lerp(depthColor, 0.3);
+
+            return new THREE.Points(geometry, new THREE.PointsMaterial({
+                size: 0.8,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9,
+                depthTest: true,
+                sizeAttenuation: false
+            }));
+        }
+        // magnitude-based color code
+        function getColorCode(mag) {
+            if(mag >= 8) return '#ff0000';
+            if(mag >= 7) return '#ff3300'; 
+            if(mag >= 6) return '#ff6600';
+            if(mag >= 5) return '#ff9900';
+            if(mag >= 4) return '#ffcc00';
+            if(mag >= 3) return '#ffff00'; 
+            return '#00ccff';
+        }
+
+        function latLonToVector3(lat, lon) {
+            if (Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+                console.warn('Invalid coordinates:', lat, lon);
+                return new THREE.Vector3(0, 0, 0);
+            }
+
+            const latRad = THREE.MathUtils.degToRad(lat);
+            const lonRad = THREE.MathUtils.degToRad(lon);
+
+            return new THREE.Vector3(
+                Math.cos(latRad) * Math.cos(lonRad),
+                Math.sin(latRad),
+                -Math.cos(latRad) * Math.sin(lonRad)
+            ).multiplyScalar(EARTH_RADIUS * 1.001);
+        }
+
+        // optimized marker updates based on camera position
+        const updateMarkerVisibility = throttle(() => {
+            if (!markers.length) return;
+            
+            const cameraPosition = camera.position.clone();
+            const earthCenter = new THREE.Vector3(0, 0, 0);
+            const cameraToEarth = earthCenter.clone().sub(cameraPosition).normalize();
+            
+            markerPool.active.forEach(marker => {
+                const markerWorldPos = new THREE.Vector3();
+                marker.getWorldPosition(markerWorldPos);
+                const earthToMarker = markerWorldPos.clone().sub(earthCenter).normalize();
+                marker.visible = earthToMarker.dot(cameraToEarth) < 0;
+            });
+        }, 16);
+
+        function highlightMarker(marker) {
+            if (currentLine) earth.remove(currentLine);
+            
             const markerPos = marker.position.clone();
             const lineDirection = markerPos.clone().normalize();
             const lineEnd = markerPos.clone().add(lineDirection.multiplyScalar(3));
@@ -260,95 +513,176 @@ function updateMarkers(features) {
             ]);
             
             lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            
-            const lineMaterial = new THREE.LineBasicMaterial({
-                color: 0x00ff00,
-                linewidth: 2
-            });
-            
-            currentLine = new THREE.Line(lineGeometry, lineMaterial);
-            earth.add(currentLine); // Add to Earth instead of scene
-
-            // Highlight entry
-            document.querySelectorAll('.quake-entry').forEach(e => 
-                e.style.background = 'transparent');
-            entry.style.background = 'rgba(0, 255, 0, 0.2)';
-        });
-
-        quakeList.appendChild(entry);
-    });
-}
-
-// could change color based on magnitude
-function getColorCode(mag) {
-    if(mag >= 8) return '#ff0000';
-    if(mag >= 7) return '#ff3300'; 
-    if(mag >= 6) return '#ff6600';
-    if(mag >= 5) return '#ff9900';
-    if(mag >= 4) return '#ffcc00';
-    if(mag >= 3) return '#ffff00'; 
-    return '#00ccff';
-}
-
-// fixed longitude offset by changing the direction of rotation
-function latLonToVector3(lat, lon) {
-    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-        console.warn('Invalid coordinates:', lat, lon);
-        return new THREE.Vector3(0, 0, 0);
-    }
-
-    const latRad = THREE.MathUtils.degToRad(lat);
-    const lonRad = THREE.MathUtils.degToRad(lon);
-
-    // Align with Three.js right-handed coordinate system
-    return new THREE.Vector3(
-        Math.cos(latRad) * Math.cos(lonRad), // X-axis
-        Math.sin(latRad),                    // Y-axis (latitude)
-        -Math.cos(latRad) * Math.sin(lonRad) // Z-axis (longitude, inverted)
-    ).multiplyScalar(EARTH_RADIUS * 1.001);
-}
-
-// markers should ne hidden when they are behind the earth
-function updateMarkerVisibility() {
-    const cameraPosition = camera.position.clone();
-    const earthCenter = new THREE.Vector3(0, 0, 0);
-    
-    markers.forEach(marker => {
-        // Get marker's world position
-        const markerWorldPos = new THREE.Vector3();
-        marker.getWorldPosition(markerWorldPos);
-        
-        // Check if marker is on the visible hemisphere
-        const cameraToEarth = earthCenter.clone().sub(cameraPosition).normalize();
-        const earthToMarker = markerWorldPos.clone().sub(earthCenter).normalize();
-        marker.visible = earthToMarker.dot(cameraToEarth) < 0;
-    });
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    const time = Date.now() * 0.001;
-    
-    markers.forEach(marker => {
-        if(marker.userData) {
-            marker.material.opacity = 0.7 + 0.2 * Math.sin(time + marker.userData.phase);
+            currentLine = new THREE.Line(
+                lineGeometry,
+                new THREE.LineBasicMaterial({ color: 0x00ffaa, linewidth: 2 })
+            );
+            earth.add(currentLine);
         }
-    });
-    
-    updateMarkerVisibility();
-    // Only rotate if not paused
-    if (!isRotationPaused) {
-        earth.rotation.y -= ROTATION_SPEED;
-    }
-    controls.update();
-    renderer.render(scene, camera);
-}
 
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
-</script>
+        function formatCoordinate(coord, isLatitude) {
+            const directions = isLatitude ? ['N', 'S'] : ['E', 'W'];
+            const absolute = Math.abs(coord).toFixed(2);
+            const direction = directions[coord >= 0 ? 0 : 1];
+            return `${absolute}° ${direction}`;
+        }
+
+        function updateEventDetails(entry, feature) {
+            const details = entry.querySelector('.event-details');
+            if (!details) return;
+
+            const props = feature.properties;
+            const [lon, lat, depth] = feature.geometry.coordinates;
+            
+            details.textContent = [
+                `MAG:   ${props.mag.toFixed(1)} ${props.magType?.toUpperCase() || 'ML'}`,
+                `DEPTH: ${Math.abs(depth).toFixed(1)}km`,
+                `LAT:   ${formatCoordinate(lat, true)}`,
+                `LON:   ${formatCoordinate(lon, false)}`,
+                `TIME:  ${new Date(props.time).toLocaleString()}`,
+                `PLACE: ${props.place || 'Unknown'}`
+            ].join('\n');
+        }
+
+        function applyTimeFilter() {
+            if (!quakeData.length) return;
+            
+            const cutoffTime = Date.now() - (activeTimeRange * 60 * 60 * 1000);
+            filteredData = quakeData.filter(feature => 
+                feature.properties.time >= cutoffTime
+            );
+
+            updateMarkers(filteredData);
+            updateEventList(filteredData);
+        }
+
+        // event list updates
+        function updateEventList(features) {
+            if (!domElements.eventList) return;
+            
+            const fragment = document.createDocumentFragment();
+            features.sort((a, b) => b.properties.mag - a.properties.mag);
+
+            features.forEach(feature => {
+                const entry = document.createElement('div');
+                entry.className = 'event-item';
+                const mag = feature.properties.mag;
+                
+                entry.innerHTML = `
+                    <div class="event-info">
+                        <span style="color: ${getColorCode(mag)}">M${mag.toFixed(1).padStart(4)}</span> | ${new Date(feature.properties.time).toISOString().slice(11,19)}
+                    </div>
+                    <div class="event-place">${feature.properties.place || 'Unknown'}</div>
+                    <div class="event-details"></div>
+                `;
+
+                entry.addEventListener('click', () => selectEvent(entry, feature));
+                fragment.appendChild(entry);
+            });
+
+            domElements.eventList.innerHTML = '';
+            domElements.eventList.appendChild(fragment);
+        }
+
+        function getColorByMagnitude(mag) {
+            if (mag >= 7) return '#ff3300';
+            if (mag >= 6) return '#ff6600';
+            if (mag >= 5) return '#ff9900';
+            if (mag >= 4) return '#ffcc00';
+            return '#00ccff';
+        }
+
+        function selectEvent(entry, feature) {
+            if (entry.classList.contains('selected')) {
+                entry.classList.remove('selected');
+                if (currentLine) {
+                    earth.remove(currentLine);
+                    currentLine = null;
+                }
+                return;
+            }
+
+            document.querySelectorAll('.event-item').forEach(e => 
+                e.classList.remove('selected'));
+            entry.classList.add('selected');
+            
+            const selectedMarker = markerPool.idToMarker.get(feature.properties.time);
+            if (selectedMarker) {
+                highlightMarker(selectedMarker);
+            }
+            
+            updateEventDetails(entry, feature);
+        }
+
+        // event panel is draggable and resizable, saves position and size in localStorage
+        function initDragAndResize() {
+            const panel = document.querySelector('.events-panel');
+            const header = panel.querySelector('.panel-header');
+
+            const savedPos = JSON.parse(localStorage.getItem('panelPosition') || '{}');
+            if (savedPos.x && savedPos.y) {
+                panel.style.right = null;
+                panel.style.left = savedPos.x + 'px';
+                panel.style.top = savedPos.y + 'px';
+            }
+            if (savedPos.width && savedPos.height) {
+                panel.style.width = savedPos.width + 'px';
+                panel.style.height = savedPos.height + 'px';
+            }
+
+            header.addEventListener('mousedown', startDragging);
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDragging);
+
+            // save position when done resizing
+            let resizeObserver = new ResizeObserver(() => {
+                savePosition(panel);
+            });
+            resizeObserver.observe(panel);
+        }
+
+        function startDragging(e) {
+            const panel = document.querySelector('.events-panel');
+            isDragging = true;
+            initialX = e.clientX - panel.offsetLeft;
+            initialY = e.clientY - panel.offsetTop;
+        }
+
+        function drag(e) {
+            if (!isDragging) return;
+
+            e.preventDefault();
+            const panel = document.querySelector('.events-panel');
+            
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+
+            // keep panel within viewport bounds
+            currentX = Math.min(Math.max(currentX, 0), window.innerWidth - panel.offsetWidth);
+            currentY = Math.min(Math.max(currentY, 0), window.innerHeight - panel.offsetHeight);
+
+            panel.style.left = currentX + 'px';
+            panel.style.top = currentY + 'px';
+            panel.style.right = null;
+        }
+
+        function stopDragging() {
+            if (!isDragging) return;
+            isDragging = false;
+            savePosition(document.querySelector('.events-panel'));
+        }
+
+        function savePosition(panel) {
+            const position = {
+                x: panel.offsetLeft,
+                y: panel.offsetTop,
+                width: panel.offsetWidth,
+                height: panel.offsetHeight
+            };
+            localStorage.setItem('panelPosition', JSON.stringify(position));
+        }
+
+        init().catch(console.error);
+    </script>
 </body>
 </html>
