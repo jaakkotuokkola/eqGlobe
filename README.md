@@ -1,4 +1,4 @@
 # eqGlobe
 earth data visualization thing in browser using threejs
 
-![Image](https://github.com/user-attachments/assets/e90cd17b-4281-4ba0-a278-e3be84cdd711)
+![Image](https://github.com/user-attachments/assets/735bfe23-9945-42bd-bf3b-69a8015ba8c9)
