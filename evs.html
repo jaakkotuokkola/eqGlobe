@@ -56,6 +56,26 @@
             margin-bottom: 8px;
         }
 
+        .sort-buttons {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .sort-button {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: var(--text);
+            padding: 2px 6px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: monospace;
+        }
+
+        .sort-button.active {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
         .time-slider {
             width: 100%;
             margin: 4px 0;
@@ -167,10 +187,14 @@
 </head>
 <body>
     <div class="events-panel">
-        <div class="panel-header">Events</div>
+        <div class="panel-header">Events <span id="events-total"></span></div>
         <div class="time-control">
             <div>Time Range: <span id="time-value">24h</span></div>
             <input type="range" class="time-slider" min="1" max="168" value="24" step="1">
+            <div class="sort-buttons">
+                <button class="sort-button active" data-sort="mag">Sort by Magnitude</button>
+                <button class="sort-button" data-sort="time">Sort by Time</button>
+            </div>
         </div>
         <div class="event-list" id="event-list"></div>
     </div>
@@ -200,6 +224,8 @@
         let currentY;
         let initialX;
         let initialY;
+
+        let currentSort = 'mag'; // Add this with other global variables
 
         // cached DOM elements
         const domElements = {
@@ -260,6 +286,7 @@
         async function init() {
             try {
                 cacheDOMElements();
+                initSortButtons();
                 scene = new THREE.Scene();
                 camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
                 
@@ -561,7 +588,17 @@
             if (!domElements.eventList) return;
             
             const fragment = document.createDocumentFragment();
-            features.sort((a, b) => b.properties.mag - a.properties.mag);
+            
+            // sort based on current sort selection
+            features.sort((a, b) => {
+                if (currentSort === 'mag') {
+                    return b.properties.mag - a.properties.mag;
+                } else {
+                    return b.properties.time - a.properties.time;
+                }
+            });
+
+            document.getElementById('events-total').textContent = `(Total: ${features.length})`;
 
             features.forEach(feature => {
                 const entry = document.createElement('div');
@@ -612,6 +649,17 @@
             }
             
             updateEventDetails(entry, feature);
+        }
+
+        function initSortButtons() {
+            document.querySelectorAll('.sort-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    document.querySelectorAll('.sort-button').forEach(b => b.classList.remove('active'));
+                    button.classList.add('active');
+                    currentSort = button.dataset.sort;
+                    applyTimeFilter(); // This will re-sort and update the list
+                });
+            });
         }
 
         // event panel is draggable and resizable, saves position and size in localStorage
