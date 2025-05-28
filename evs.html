@@ -148,7 +148,7 @@
             background: rgba(0, 0, 0, 0.9);
             padding: 8px 12px;
             font-family: monospace;
-            z-index: 10000;  /* loading is visible, should change position for less obstructive ux*/
+            z-index: 10000;
             color: #ffffff;
         }
 
@@ -225,9 +225,8 @@
         let initialX;
         let initialY;
 
-        let currentSort = 'mag'; // Add this with other global variables
+        let currentSort = 'mag';
 
-        // cached DOM elements
         const domElements = {
             panel: null,
             eventList: null,
@@ -250,7 +249,6 @@
                 return createMarker(mag, depth);
             },
             updateMarker(marker, mag, depth) {
-                // update existing marker
                 const size = 0.15 * Math.log(mag + 1) * 1.8;
                 const color = new THREE.Color().setHSL(0.66 * (1 - mag/8), 0.8, 0.6 + mag/15);
                 marker.material.size = size;
@@ -263,7 +261,6 @@
             }
         };
 
-        // throttle function for marker visibility updates,
         function throttle(func, limit) {
             let inThrottle;
             return function(...args) {
@@ -295,7 +292,6 @@
                 renderer.domElement.id = 'renderer';
                 document.body.appendChild(renderer.domElement);
                 
-                // earth texture
                 const textureLoader = new THREE.TextureLoader();
                 const earthTexture = await textureLoader.loadAsync(
                     'https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Blue_Marble_2002.png/1024px-Blue_Marble_2002.png'
@@ -412,11 +408,9 @@
             }
         }
 
-        // Optimized updateMarkers function
         function updateMarkers(features) {
             if (!features?.length || !earth) return;
 
-            // clear previous markers
             markerPool.active.forEach((marker) => {
                 markerPool.recycleMarker(marker);
                 earth.remove(marker);
@@ -510,7 +504,6 @@
             ).multiplyScalar(EARTH_RADIUS * 1.001);
         }
 
-        // optimized marker updates based on camera position
         const updateMarkerVisibility = throttle(() => {
             if (!markers.length) return;
             
@@ -583,7 +576,6 @@
             updateEventList(filteredData);
         }
 
-        // event list updates
         function updateEventList(features) {
             if (!domElements.eventList) return;
             
@@ -657,12 +649,11 @@
                     document.querySelectorAll('.sort-button').forEach(b => b.classList.remove('active'));
                     button.classList.add('active');
                     currentSort = button.dataset.sort;
-                    applyTimeFilter(); // This will re-sort and update the list
+                    applyTimeFilter();
                 });
             });
         }
 
-        // event panel is draggable and resizable, saves position and size in localStorage
         function initDragAndResize() {
             const panel = document.querySelector('.events-panel');
             const header = panel.querySelector('.panel-header');
@@ -682,7 +673,6 @@
             document.addEventListener('mousemove', drag);
             document.addEventListener('mouseup', stopDragging);
 
-            // save position when done resizing
             let resizeObserver = new ResizeObserver(() => {
                 savePosition(panel);
             });
@@ -705,7 +695,6 @@
             currentX = e.clientX - initialX;
             currentY = e.clientY - initialY;
 
-            // keep panel within viewport bounds
             currentX = Math.min(Math.max(currentX, 0), window.innerWidth - panel.offsetWidth);
             currentY = Math.min(Math.max(currentY, 0), window.innerHeight - panel.offsetHeight);
 
